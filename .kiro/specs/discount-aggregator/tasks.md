@@ -1,0 +1,285 @@
+# Implementation Plan: Discount Aggregator
+
+## Overview
+
+Incremental implementation of the discount aggregator starting with core infrastructure, then data pipeline, then AI scoring, then user-facing features, and finally premium features.
+
+## Tasks
+
+- [x] 1. Project setup and core interfaces
+  - Initialize monorepo: `apps/mobile` (React Native), `apps/api` (Node.js/TypeScript), `services/ai-scoring` (Python/FastAPI)
+  - Configure TypeScript, ESLint, Prettier for API; set up fast-check for property tests
+  - Define core TypeScript interfaces: `ProductListing`, `PriceHistoryEntry`, `ProductMatch`, `Deal`, `BankOffer`, `Cart`, `Wishlist`, `DealFeedSubmission`, `AutoCheckoutTrigger`
+  - Set up PostgreSQL schema migrations (using `node-postgres` + `db-migrate`)
+  - Set up TimescaleDB hypertable for `price_history`
+  - Configure Redis connection and BullMQ queue definitions
+  - _Requirements: 1.6, 3.1, 4.1, 5.1_
+
+- [ ] 2. Data ingestion pipeline
+  - [ ] 2.1 Implement Scraper Service base
+    - Set up Playwright headless browser pool with proxy rotation
+    - Implement `scrape(url): ScraperOutput` returning `{ platform, product_id, name, price, original_price, discount_pct, url, image_url, attributes }`
+    - Implement exponential backoff retry logic (3 attempts, base delay 1s, multiplier 2)
+    - Log failures to structured error log
+    - _Requirements: 1.3, 1.4_
+  - [ ] 2.2 Write property test for scraper output schema completeness
+    - **Property 12: Scraper output schema completeness**
+    - **Validates: Requirements 1.3**
+  - [ ] 2.3 Write property test for exponential backoff
+    - For any sequence of retries, verify delay[n+1] >= 2 * delay[n]
+    - _Requirements: 1.4_
+  - [ ] 2.4 Implement Ingestion Worker (BullMQ)
+    - Schedule platform polling every 30 minutes per platform
+    - Call scraper or platform API adapter, upsert `product_listings`, append `price_history`
+    - _Requirements: 1.5, 1.6_
+  - [ ] 2.5 Write property test for price history append invariant
+    - **Property 1: Price history append-only invariant**
+    - **Validates: Requirements 1.6**
+
+- [ ] 3. Platform staleness detection
+  - [ ] 3.1 Implement staleness tracking
+    - Track `last_successful_fetch_at` per platform in Redis
+    - Expose `isPlatformStale(platform): boolean` — returns true if last fetch > 60 minutes ago
+    - _Requirements: 2.4_
+  - [ ] 3.2 Write property test for staleness flag
+    - **Property 19: Staleness flag for unreachable platform**
+    - For any platform with last_successful_fetch_at > 60 min ago, isPlatformStale must return true
+    - **Validates: Requirements 2.4**
+
+- [ ] 4. Product Matching Engine
+  - [ ] 4.1 Implement attribute normalization
+    - Normalize product name tokens: lowercase, remove stop words, expand common abbreviations (GB/gb, inch/")
+    - Normalize structured attributes: brand, model_number, color, capacity
+    - _Requirements: 3.5_
+  - [ ] 4.2 Write property test for normalization idempotence
+    - **Property 17: Attribute normalization idempotence**
+    - For any product attributes, normalize(normalize(x)) must equal normalize(x)
+    - **Validates: Requirements 3.5**
+  - [ ] 4.3 Implement TF-IDF cosine similarity scorer
+    - Compute name token similarity between two listings
+    - _Requirements: 3.1_
+  - [ ] 4.4 Implement match confidence computation
+    - Weighted score: name_similarity (0.4) + brand_match (0.3) + model_match (0.2) + attribute_overlap (0.1)
+    - Produce confidence in [0.0, 1.0], store as [0, 100]
+    - Set `verified = true` if confidence >= 70, else `verified = false`
+    - _Requirements: 3.3, 3.4_
+  - [ ] 4.5 Write property test for match confidence bounds and threshold
+    - **Property 6: Match confidence bounds and threshold**
+    - For any two product listings, confidence must be in [0, 100]; if < 70 then verified = false; if >= 70 then verified = true
+    - **Validates: Requirements 3.3, 3.4**
+  - [ ] 4.6 Implement Matching Worker (BullMQ)
+    - On new listing ingestion, run matching against existing listings, write to `product_matches`
+    - _Requirements: 3.1_
+
+- [ ] 5. AI Scoring Service
+  - [ ] 5.1 Implement Value Score computation (Python/FastAPI)
+    - Inputs: current_price, original_price, price_history (90 days), category_avg_discount
+    - genuine_discount = discount from 90-day median (not listed original price)
+    - Formula: value_score = (genuine_discount_pct * 0.6) + (price_vs_history_percentile * 0.3) + (category_rank * 0.1)
+    - Output: integer clamped to [0, 100]
+    - _Requirements: 4.1_
+  - [ ] 5.2 Write property test for Value Score bounds
+    - **Property 2: Value Score bounds [0, 100]**
+    - For any valid input combination, value_score must be an integer in [0, 100]
+    - **Validates: Requirements 4.1**
+  - [ ] 5.3 Implement Fake Discount detection
+    - IF listed_original_price > p90(price_history_90d) → fake_discount_flag = true
+    - IF price history days < 7 → low_confidence_score = true
+    - _Requirements: 4.2, 4.5_
+  - [ ] 5.4 Write property test for Fake Discount flag consistency
+    - **Property 3: Fake Discount flag consistency**
+    - For any product where original_price > p90(history), fake_discount_flag must be true; else false
+    - **Validates: Requirements 4.2**
+  - [ ] 5.5 Write property test for low confidence flag
+    - **Property 4: Low confidence when history < 7 days**
+    - For any product with < 7 price history entries (days), low_confidence_score must be true
+    - **Validates: Requirements 4.5**
+  - [ ] 5.6 Implement AI Scoring Worker (BullMQ)
+    - After price update, call AI scoring service, update `value_score`, `fake_discount_flag`, `low_confidence_score` on listing
+    - _Requirements: 4.1, 4.2, 4.5_
+
+- [ ] 6. Checkpoint — Ensure all pipeline tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 7. Bank Offer Optimization
+  - [ ] 7.1 Implement Bank Offer data model and seeder
+    - Schema: `{ platform, bank_name, card_types[], discount_type, value, max_cap, min_order, valid_until }`
+    - Bank Offer Worker: refresh data daily
+    - _Requirements: 5.1_
+  - [ ] 7.2 Implement effective price computation
+    - `computeEffectivePrice(listed_price, bank_offer): number`
+    - Formula: effective = listed - flat_discount - min(percent * listed, max_cap)
+    - effective must never exceed listed_price
+    - _Requirements: 5.4_
+  - [ ] 7.3 Write property test for effective price bounds
+    - **Property 5: Effective price never exceeds listed price**
+    - For any (price, bank_offer) combination, effective_price <= listed_price
+    - **Validates: Requirements 5.4**
+  - [ ] 7.4 Implement best payment method selector
+    - Given user payment methods and available bank offers, return the offer yielding minimum effective price
+    - _Requirements: 5.3, 5.5_
+  - [ ] 7.5 Write property test for best payment method selection
+    - **Property 20: Best payment method selection**
+    - For any set of payment methods and offers, selected offer must yield the minimum effective price among all options
+    - **Validates: Requirements 5.3**
+
+- [ ] 8. User Authentication
+  - [ ] 8.1 Implement registration and login endpoints
+    - POST /auth/register — email/password with validation (email format, min 8 chars, 1 number, 1 special char)
+    - POST /auth/login — return JWT
+    - POST /auth/oauth — Google and Apple OAuth flow
+    - _Requirements: 10.1, 10.2_
+  - [ ] 8.2 Write property test for registration input validation
+    - **Property 18: Registration input validation**
+    - For any email string not matching RFC 5322 format or password not meeting strength rules, registration must be rejected
+    - **Validates: Requirements 10.2**
+  - [ ] 8.3 Implement password hashing with bcrypt
+    - Hash on register, verify on login; stored hash must never equal plaintext
+    - _Requirements: 10.3_
+  - [ ] 8.4 Implement JWT middleware and session expiry
+    - Enforce re-auth if last_active_at > 30 days
+    - _Requirements: 10.4_
+  - [ ] 8.5 Write property test for inactivity re-auth
+    - **Property: Inactivity re-auth**
+    - For any user with last_active_at > 30 days, auth check must require re-authentication
+    - **Validates: Requirements 10.4**
+  - [ ] 8.6 Implement payment method management endpoints
+    - POST /user/payment-methods — add (reject if count >= 10, store tokenized ref only)
+    - DELETE /user/payment-methods/:id — remove
+    - _Requirements: 10.5_
+  - [ ] 8.7 Write property test for payment method count invariant
+    - **Property 11: Payment method count ≤ 10**
+    - For any user, adding an 11th payment method must return an error and count must remain 10
+    - **Validates: Requirements 10.5**
+
+- [ ] 9. Cart and Wishlist
+  - [ ] 9.1 Implement Cart CRUD endpoints
+    - POST /cart/items, DELETE /cart/items/:id, GET /cart (grouped by platform with per-platform subtotals)
+    - _Requirements: 7.1, 7.2_
+  - [ ] 9.2 Write property test for cart round-trip persistence
+    - **Property 7: Cart round-trip persistence**
+    - For any sequence of add operations across platforms, GET /cart must return all added items with no losses or duplicates
+    - **Validates: Requirements 7.1, 7.6**
+  - [ ] 9.3 Implement Wishlist CRUD endpoints
+    - POST /wishlist, DELETE /wishlist/:id, GET /wishlist
+    - _Requirements: 7.3, 7.6_
+  - [ ] 9.4 Implement wishlist notification triggers
+    - Price Update Worker: compare new price to wishlist added_at price; if drop >= 5% OR fake_discount_flag = true, enqueue notification
+    - _Requirements: 7.4, 7.5_
+  - [ ] 9.5 Write property test for wishlist notification threshold
+    - **Property 8: Wishlist notification threshold**
+    - For any wishlist item where current_price <= 0.95 * price_at_add OR fake_discount_flag = true, notification must be enqueued
+    - **Validates: Requirements 7.4, 7.5**
+
+- [ ] 10. Search and Discovery
+  - [ ] 10.1 Implement full-text search endpoint
+    - GET /search?q=&platform=&min_discount=&min_value_score=&category=&min_price=&max_price=&sort=
+    - Use PostgreSQL full-text search (tsvector) over product_listings
+    - _Requirements: 11.1, 11.3, 11.4_
+  - [ ] 10.2 Write property test for filter predicate satisfaction
+    - **Property 13: Filter predicate satisfaction**
+    - For any filter applied (platform, discount, value_score, price range), all returned results must satisfy every active filter condition
+    - **Validates: Requirements 11.3**
+  - [ ] 10.3 Write property test for sort order correctness
+    - **Property 14: Sort order correctness**
+    - For any sort parameter applied, the result list must be in the correct ascending/descending order for that field
+    - **Validates: Requirements 11.4**
+
+- [ ] 11. Crowdsourced Deal Feed
+  - [ ] 11.1 Implement deal submission endpoint
+    - POST /feed/submit — validate URL resolves to supported platform, extract price, compute Value_Score, create submission
+    - _Requirements: 8.1, 8.2, 8.3_
+  - [ ] 11.2 Implement voting endpoints
+    - POST /feed/:id/vote — body: { direction: 'up' | 'down' }
+    - After vote: if total_votes >= 10 AND upvotes/(upvotes+downvotes) < 0.2 → is_hidden = true
+    - _Requirements: 8.4, 8.5_
+  - [ ] 11.3 Write property test for deal feed vote hiding
+    - **Property 9: Deal feed vote hiding**
+    - For any submission with total_votes >= 10 where upvote_ratio < 0.2, is_hidden must be true
+    - **Validates: Requirements 8.5**
+  - [ ] 11.4 Implement feed listing endpoint
+    - GET /feed — return non-hidden submissions with submitter, timestamp, value_score, vote counts
+    - _Requirements: 8.6_
+
+- [ ] 12. Checkpoint — Ensure all feature tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 13. Product Comparison and Deal Detail API
+  - Implement GET /products/:id/compare — return all platform listings for a Matched_Product side-by-side
+  - Implement GET /deals/:id — return full deal detail including price_history array, bank offers, value_score, fake_discount status
+  - _Requirements: 3.2, 2.1, 4.4_
+
+- [ ] 14. Redirect and Deep Link Service
+  - Implement GET /deals/:id/redirect — validate platform, construct deep link, log redirect event, return redirect URL
+  - Unit test: known product on Amazon and Flipkart returns correct deep link pattern
+  - _Requirements: 6.1, 6.3, 6.4_
+
+- [ ] 15. Auto-Checkout Bot (Premium)
+  - [ ] 15.1 Implement trigger management endpoints
+    - POST /autocheckout/trigger — create trigger (premium users only), store target_price, is_active = true
+    - DELETE /autocheckout/trigger/:id — cancel trigger (set is_active = false)
+    - PATCH /autocheckout/trigger/:id/pause — set is_active = false without deletion
+    - _Requirements: 9.1, 9.7_
+  - [ ] 15.2 Implement Auto-Checkout Worker
+    - On price update, check all active triggers for that listing; if current_price <= target_price, initiate checkout
+    - Require stored OAuth token; if absent, abort and log FAILED
+    - Write audit log entry (TRIGGERED, SUCCESS, or FAILED) for every action
+    - On failure: preserve is_active = true, enqueue failure notification
+    - _Requirements: 9.2, 9.3, 9.5, 9.6_
+  - [ ] 15.3 Write property test for auto-checkout trigger correctness
+    - **Property 15: Auto-checkout trigger fires on price condition**
+    - For any active trigger where current_price <= target_price, checkout must be initiated
+    - **Validates: Requirements 9.2**
+  - [ ] 15.4 Write property test for failed checkout preserves trigger
+    - **Property 16: Failed checkout preserves trigger**
+    - For any failed auto-checkout attempt, is_active on the trigger must remain true and a FAILED audit log entry must exist
+    - **Validates: Requirements 9.5**
+  - [ ] 15.5 Write property test for audit log completeness
+    - **Property 10: Auto-checkout audit log completeness**
+    - For any trigger that fires, at least one audit_log entry with matching trigger_id must exist with non-null occurred_at
+    - **Validates: Requirements 9.6**
+
+- [ ] 16. Notification Service integration
+  - Implement FCM push notification sender: `sendNotification(user_id, payload)`
+  - Wire all notification triggers: wishlist price drop, fake discount alert, auto-checkout result, platform staleness warning
+  - _Requirements: 7.4, 7.5, 9.4, 9.5, 2.4_
+
+- [ ] 17. Mobile App — Core screens
+  - [ ] 17.1 Home feed screen
+    - Fetch and display paginated deals from GET /deals; show Value_Score badge, Fake Discount warning label
+    - _Requirements: 4.3, 2.1_
+  - [ ] 17.2 Product detail and comparison screen
+    - Display Price_History chart, cross-platform comparison table, bank offer optimizer panel
+    - Show staleness indicator (time since last refresh)
+    - Show platform name and logo with Buy button that triggers redirect
+    - _Requirements: 3.2, 4.4, 5.2, 6.4, 2.1_
+  - [ ] 17.3 Search and filter screen
+    - Search bar wired to GET /search; filter and sort controls
+    - Empty state: show suggestions/trending deals
+    - _Requirements: 11.1, 11.3, 11.4, 11.5_
+  - [ ] 17.4 Cart and Wishlist screens
+    - Cart: grouped by platform with per-platform subtotals and redirect-to-checkout buttons
+    - Wishlist: list with price change indicators
+    - _Requirements: 7.1, 7.2, 7.3_
+  - [ ] 17.5 Deal Feed screen
+    - List submissions with upvote/downvote controls, Value_Score, submitter, timestamp
+    - Submit deal form with URL input
+    - _Requirements: 8.1, 8.4, 8.6_
+  - [ ] 17.6 Auth screens
+    - Login, Register, OAuth buttons
+    - _Requirements: 10.1_
+  - [ ] 17.7 Premium: Auto-Checkout Bot settings screen
+    - List active triggers with target price; create/pause/cancel trigger controls
+    - _Requirements: 9.1, 9.7_
+
+- [ ] 18. Final checkpoint — Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+## Notes
+
+- Tasks marked with `*` are optional and can be skipped for a faster MVP — all tasks are now required per your choice
+- Each task references specific requirements for traceability
+- Checkpoints at steps 6, 12, and 18 ensure incremental validation
+- Property tests use fast-check (TypeScript backend) and Hypothesis (Python AI service)
+- Auto-Checkout Bot (step 15) is gated behind a `is_premium` user flag
+- Payment data is always tokenized — raw card data never stored or logged
