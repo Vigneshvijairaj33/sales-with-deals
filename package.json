@@ -1,13 +1,22 @@
 {
-  "name": "discount-aggregator",
+  "name": "dealradar-web",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "apps/api",
-    "apps/mobile"
-  ],
+  "type": "module",
   "scripts": {
-    "api": "npm run dev --workspace=apps/api",
-    "test": "npm run test --workspace=apps/api"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "@vitejs/plugin-react": "4.3.1",
+    "typescript": "5.4.5",
+    "vite": "5.2.11"
   }
 }
