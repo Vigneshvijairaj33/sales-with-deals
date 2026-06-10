@@ -481,8 +481,20 @@ function HomeView({ deals, cart, wishlist, onAddCart, onAddWishlist, updatedIds,
     .filter(d => catFilter==='ALL' || d.category===catFilter);
   return (
     <div>
+      {/* Hero banner */}
+      <div className="home-hero">
+        <div className="home-hero-title">Find the <span>Best Deals</span><br/>Across Every Platform</div>
+        <div className="home-hero-sub">Real-time prices from Amazon, Flipkart, Myntra & more — with AI-powered fake discount detection.</div>
+        <div className="home-hero-stats">
+          <div className="hero-stat"><div className="hero-stat-val">20+</div><div className="hero-stat-label">Products</div></div>
+          <div className="hero-stat"><div className="hero-stat-val">3</div><div className="hero-stat-label">Platforms</div></div>
+          <div className="hero-stat"><div className="hero-stat-val">Live</div><div className="hero-stat-label">Prices</div></div>
+          <div className="hero-stat"><div className="hero-stat-val">₹0</div><div className="hero-stat-label">Free to Use</div></div>
+        </div>
+      </div>
+
       <LiveRefreshBar countdown={countdown} lastRefresh={lastRefresh} onRefresh={onRefresh} updatedCount={Array.from(updatedIds).length} />
-      <div className="section-header" style={{ marginTop:16 }}>
+      <div className="section-header" style={{ marginTop:18 }}>
         <h2>🔥 Top Deals Today <span style={{ fontSize:13, color:'var(--text2)', fontWeight:400 }}>({filtered.length} products)</span></h2>
         <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
           {platforms.map(p => <button key={p} className={`filter-btn ${filter===p?'active':''}`} onClick={() => setFilter(p)}>{p}</button>)}
@@ -511,7 +523,10 @@ function SearchView({ deals, cart, wishlist, onAddCart, onAddWishlist, updatedId
     <div>
       <div className="section-header"><h2>🔎 Search Deals</h2></div>
       <div className="search-bar-row">
-        <input style={{ flex:1, fontSize:15, padding:'10px 14px' }} placeholder="Search product, brand, or category…" value={q} onChange={e=>setQ(e.target.value)} autoFocus />
+        <div className="search-input-wrap">
+          <span className="search-icon">🔎</span>
+          <input style={{ fontSize:15 }} placeholder="Search product, brand, or category…" value={q} onChange={e=>setQ(e.target.value)} autoFocus />
+        </div>
         <select value={platform} onChange={e=>setPlatform(e.target.value)}>
           <option value="ALL">All Platforms</option>
           <option value="AMAZON">Amazon</option>
@@ -844,8 +859,9 @@ function FeedView() {
 function ApiStatus() {
   const [s, setS] = useState<'checking'|'ok'|'offline'>('checking');
   useEffect(() => { fetch('/api/health').then(r=>r.ok?setS('ok'):setS('offline')).catch(()=>setS('offline')); }, []);
-  const c = s==='ok'?'#34d399':s==='offline'?'#f87171':'#fbbf24';
-  return <span style={{ fontSize:12, color:c, fontWeight:600 }}>{s==='ok'?'● Live':s==='offline'?'● Offline':'○ Connecting…'}</span>;
+  const c = s==='ok'?'var(--green)':s==='offline'?'var(--text3)':'var(--yellow)';
+  const dot = s==='ok'?'🟢':s==='offline'?'⚫':'🟡';
+  return <span style={{ fontSize:11, color:c, fontWeight:600, display:'flex', alignItems:'center', gap:5 }}>{dot} {s==='ok'?'API Live':s==='offline'?'API Offline':'Connecting…'}</span>;
 }
 
 // ─── App root ─────────────────────────────────────────────────────────────────
@@ -889,59 +905,80 @@ export default function App() {
   const cartItems = deals.filter(d => cart.includes(d.id));
   const cartTotal = cartItems.reduce((s,i) => s+i.current_price, 0);
 
-  const navItems: { id:View; label:string; icon:string }[] = [
-    { id:'home',     label:'Deals',   icon:'🏷️' },
-    { id:'search',   label:'Search',  icon:'🔎' },
-    { id:'cart',     label:cart.length?`Cart (${cart.length})`:'Cart', icon:'🛒' },
-    { id:'wishlist', label:wishlist.length?`Saved (${wishlist.length})`:'Wishlist', icon:'♥' },
-    { id:'orders',   label:orders.length?`Orders (${orders.length})`:'Orders', icon:'📦' },
-    { id:'feed',     label:'Feed',    icon:'🌐' },
-    { id:'profile',  label:'Profile', icon:'👤' },
+  type NavItem = { id:View; label:string; icon:string; badge?:number };
+  const navItems: NavItem[] = [
+    { id:'home',     label:'Deals',    icon:'🏷️' },
+    { id:'search',   label:'Search',   icon:'🔎' },
+    { id:'cart',     label:'Cart',     icon:'🛒',  badge: cart.length||undefined },
+    { id:'wishlist', label:'Wishlist', icon:'♥',   badge: wishlist.length||undefined },
+    { id:'orders',   label:'Orders',   icon:'📦',  badge: orders.length||undefined },
+    { id:'feed',     label:'Feed',     icon:'🌐' },
+    { id:'profile',  label:'Profile',  icon:'👤' },
   ];
+
+  const pageTitle = navItems.find(n=>n.id===view)?.label ?? '';
 
   return (
     <div className="app">
+      {/* ── Sidebar ── */}
       <aside className="sidebar">
         <div className="logo">
-          <span style={{ fontSize:26 }}>⚡</span>
+          <div className="logo-icon">⚡</div>
           <div>
-            <div style={{ fontWeight:800, fontSize:18, letterSpacing:'-0.5px' }}>DealRadar</div>
-            <div style={{ fontSize:11, color:'var(--text2)' }}>Multi-platform deals</div>
+            <div className="logo-text">DealRadar</div>
+            <div className="logo-sub">Smart Deals · Live Prices</div>
           </div>
         </div>
+
         <nav className="nav">
+          <div className="nav-section-label">Navigation</div>
           {navItems.map(item => (
             <button key={item.id} className={`nav-item ${view===item.id?'active':''}`} onClick={() => setView(item.id)}>
-              <span>{item.icon}</span><span>{item.label}</span>
+              <span className="nav-icon">{item.icon}</span>
+              <span>{item.label}</span>
+              {item.badge ? <span className="nav-badge">{item.badge}</span> : null}
             </button>
           ))}
         </nav>
+
         <div className="sidebar-footer">
           <ApiStatus />
           {user && (
-            <div className="sidebar-user">
+            <div className="sidebar-user" onClick={() => setView('profile')} style={{ cursor:'pointer' }}>
               <div className="user-avatar-sm">{user.avatar}</div>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.name}</div>
-                <div style={{ fontSize:10, color:'var(--text2)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.email}</div>
+                <div style={{ fontSize:12, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.name}</div>
+                <div style={{ fontSize:10, color:'var(--text3)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.email}</div>
               </div>
             </div>
           )}
         </div>
       </aside>
 
+      {/* ── Main ── */}
       <main className="main">
         <div className="topbar">
-          <h1 className="page-title">{navItems.find(n=>n.id===view)?.icon} {navItems.find(n=>n.id===view)?.label.replace(/\s*\(.*\)/,'')}</h1>
-          <div style={{ display:'flex', gap:12, alignItems:'center' }}>
-            <span style={{ fontSize:12, color:'var(--text2)' }}>{new Date().toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})}</span>
+          <h1 className="page-title">
+            <span style={{ fontSize:22 }}>{navItems.find(n=>n.id===view)?.icon}</span>
+            {pageTitle}
+          </h1>
+          <div className="topbar-right">
+            <span style={{ fontSize:12, color:'var(--text3)' }}>
+              {new Date().toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'})}
+            </span>
             {user ? (
               <div className="user-menu">
-                <div className="user-avatar" onClick={() => setView('profile')} style={{ cursor:'pointer' }} title="My Profile">{user.avatar}</div>
+                <div className="user-avatar" onClick={() => setView('profile')} title="My Profile">{user.avatar}</div>
                 <span style={{ fontSize:13, fontWeight:600 }}>{user.name.split(' ')[0]}</span>
+                <button className="btn-secondary" style={{ padding:'6px 14px', fontSize:12 }}
+                  onClick={() => { setUser(null); setView('home'); }}>
+                  Sign Out
+                </button>
               </div>
             ) : (
-              <button className="btn-primary" style={{ padding:'7px 16px', fontSize:13 }} onClick={() => setShowSignIn(true)}>Sign In</button>
+              <button className="btn-primary" style={{ padding:'8px 20px', fontSize:13 }} onClick={() => setShowSignIn(true)}>
+                Sign In
+              </button>
             )}
           </div>
         </div>
@@ -958,19 +995,12 @@ export default function App() {
       </main>
 
       {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} onSignIn={u => { setUser(u); setShowSignIn(false); }} />}
-
       {showPayment && (
-        <PaymentModal
-          total={cartTotal} items={cartItems}
+        <PaymentModal total={cartTotal} items={cartItems}
           onClose={() => setShowPayment(false)}
-          onSuccess={order => {
-            setOrders(prev => [...prev, order]);
-            setCart([]);
-            setShowPayment(false);
-          }}
+          onSuccess={order => { setOrders(prev => [...prev, order]); setCart([]); setShowPayment(false); }}
         />
       )}
-
       {billOrder && <BillStatement order={billOrder} onClose={() => setBillOrder(null)} user={user} />}
     </div>
   );
