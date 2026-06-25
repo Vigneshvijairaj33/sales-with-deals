@@ -7,7 +7,17 @@ const app = express();
 
 // Security & parsing middleware
 app.use(helmet());
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN ?? '*' }));
+app.use(cors({
+  origin: [
+    process.env.ALLOWED_ORIGIN ?? '*',
+    'http://dealradar-frontend1.s3-website.ap-south-1.amazonaws.com',
+    'http://dealradar-frontend.s3-website.ap-south-1.amazonaws.com',
+    'http://localhost:5173',
+    'http://localhost:3000',
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true,
+}));
 app.use(express.json({ limit: '1mb' }));
 
 // Rate limiting — 200 req/min per IP

@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 
+// ─── API base URL — points to EC2 backend ─────────────────────────────────────
+const API_BASE = 'http://13.206.202.239:3000';
+
 // ─── localStorage helpers ─────────────────────────────────────────────────────
 function loadLS<T>(key: string, fallback: T): T {
   try { const r = localStorage.getItem(key); return r ? (JSON.parse(r) as T) : fallback; } catch { return fallback; }
@@ -858,7 +861,11 @@ function FeedView() {
 
 function ApiStatus() {
   const [s, setS] = useState<'checking'|'ok'|'offline'>('checking');
-  useEffect(() => { fetch('/api/health').then(r=>r.ok?setS('ok'):setS('offline')).catch(()=>setS('offline')); }, []);
+  useEffect(() => {
+    fetch(`${API_BASE}/health`)
+      .then(r=>r.ok?setS('ok'):setS('offline'))
+      .catch(()=>setS('offline'));
+  }, []);
   const c = s==='ok'?'var(--green)':s==='offline'?'var(--text3)':'var(--yellow)';
   const dot = s==='ok'?'🟢':s==='offline'?'⚫':'🟡';
   return <span style={{ fontSize:11, color:c, fontWeight:600, display:'flex', alignItems:'center', gap:5 }}>{dot} {s==='ok'?'API Live':s==='offline'?'API Offline':'Connecting…'}</span>;

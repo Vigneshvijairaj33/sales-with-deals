@@ -3,6 +3,5 @@ node_modules/
 *.local
 .DS_Store
 dist/
-apps/
 services/
 .kiro/
